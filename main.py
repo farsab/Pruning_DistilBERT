@@ -57,35 +57,29 @@ def train_model(model, dataset, tokenizer):
     trainer.train()
     return trainer.evaluate()
 
+dataset = load_dataset("glue", "sst2").select(range(2000))
+tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 
-def main():
-    dataset = load_dataset("glue", "sst2").select(range(2000))
-    tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+def tokenize_fn(example):
+    return tokenizer(example["sentence"], truncation=True)
 
-    def tokenize_fn(example):
-        return tokenizer(example["sentence"], truncation=True)
+dataset = dataset.map(tokenize_fn, batched=True).remove_columns(["sentence", "idx"])
 
-    dataset = dataset.map(tokenize_fn, batched=True).remove_columns(["sentence", "idx"])
+model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
+base_metrics = train_model(model, dataset, tokenizer)
 
-    model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
-    base_metrics = train_model(model, dataset, tokenizer)
+pruned_model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
+pruned_model = apply_pruning(pruned_model)
+pruned_metrics = train_model(pruned_model, dataset, tokenizer)
 
-    pruned_model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
-    pruned_model = apply_pruning(pruned_model)
-    pruned_metrics = train_model(pruned_model, dataset, tokenizer)
+quant_model = apply_quantization(pruned_model)
+quant_metrics = train_model(quant_model, dataset, tokenizer)
 
-    quant_model = apply_quantization(pruned_model)
-    quant_metrics = train_model(quant_model, dataset, tokenizer)
+results = pd.concat([
+    pd.DataFrame([{"Model": "Original", **base_metrics}]),
+    pd.DataFrame([{"Model": "Pruned", **pruned_metrics}]),
+    pd.DataFrame([{"Model": "Pruned+Quantized", **quant_metrics}]),
+], ignore_index=True)
 
-    results = pd.concat([
-        pd.DataFrame([{"Model": "Original", **base_metrics}]),
-        pd.DataFrame([{"Model": "Pruned", **pruned_metrics}]),
-        pd.DataFrame([{"Model": "Pruned+Quantized", **quant_metrics}]),
-    ], ignore_index=True)
-
-    print("\n=== SST-2 Evaluation Results ===")
-    print(results.to_string(index=False))
-
-
-if __name__ == "__main__":
-    main()
+print("\n=== SST-2 Evaluation Results ===")
+print(results.to_string(index=False))
